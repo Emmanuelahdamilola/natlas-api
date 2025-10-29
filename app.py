@@ -52,8 +52,8 @@ except FileNotFoundError as e:
     print(f"   Make sure {CACHE_DIR_NAME}/ folder exists with JSON files")
 
 try:
-    # Load Language Detection Model (lid.176.bin assumed to be at repo root)
-    model_path = os.path.join(os.path.dirname(__file__), 'lid.176.bin')
+    # Load Language Detection Model (lid.176.ftz)
+    model_path = os.path.join(os.path.dirname(__file__), 'lid.176.ftz')
     if os.path.exists(model_path):
         LANG_MODEL = fasttext.load_model(model_path)
         print("✅ Language Detection Model loaded!")
