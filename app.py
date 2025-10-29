@@ -8,7 +8,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
 import os
-from fuzzywuzzy import fuzz, process
+from rapidfuzz import fuzz, process
 from datetime import datetime
 
 # --- NEW IMPORTS FOR LANGUAGE DETECTION ---
