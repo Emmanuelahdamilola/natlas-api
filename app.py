@@ -43,7 +43,10 @@ try:
     with open(os.path.join(CACHE_DIR, 'metadata.json'), 'r', encoding='utf-8') as f:
         METADATA = json.load(f)
     
-    total_cached = sum(len(CACHED_DATA.get(lang, [])) for lang in ['yoruba', 'igbo', 'hausa', 'english'])
+    total_cached = sum(
+        len(CACHED_DATA.get(lang, [])) 
+        for lang in ['yoruba', 'igbo', 'hausa', 'english']
+    )
     
     print(f"✅ Loaded {total_cached} cached responses")
     print(f"   Generated: {METADATA.get('generated_at', 'Unknown')}")
@@ -56,14 +59,16 @@ except FileNotFoundError as e:
 UNIVERSAL_CACHED_INPUTS = []
 for lang, cases in CACHED_DATA.items():
     for case in cases:
-        if case.get('success', False):
+        # ✅ Skip strings or malformed entries safely
+        if isinstance(case, dict) and case.get('success', False):
             UNIVERSAL_CACHED_INPUTS.append({
                 'input': case.get('input', ''),
                 'language': lang,
                 'full_case': case
             })
-# ----------------------------------------------------------------------------
 
+print(f"🌍 Universal cache ready with {len(UNIVERSAL_CACHED_INPUTS)} valid cases")
+# ----------------------------------------------------------------------------
 
 # --- Language Detection Function (Only used for fallback message language tag) ---
 def detect_language(text):
