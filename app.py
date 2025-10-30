@@ -1,37 +1,37 @@
 # ============================================================================
 # N-ATLAS API Server - Production Deployment
-# Serves 250 cached Nigerian medical language responses
-# Supports: Yoruba, Igbo, Hausa, English
 # ============================================================================
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
 import os
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz, process 
 from datetime import datetime
 
-# --- NEW IMPORTS FOR LANGUAGE DETECTION ---
-import fasttext 
+# --- NEW IMPORTS: Using the stable langdetect library ---
+from langdetect import detect, DetectorFactory 
 # --- END NEW IMPORTS ---
 
 app = Flask(__name__)
 CORS(app) 
 
 # ============================================================================
-# LOAD CACHED RESPONSES & LANGUAGE MODEL (STEP 1)
+# LOAD CACHED RESPONSES & LANGUAGE SETUP (STEP 1)
 # ============================================================================
+
+# Set seed for langdetect for deterministic results
+DetectorFactory.seed = 0 
 
 CACHE_DIR_NAME = 'cache' 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), CACHE_DIR_NAME)
 
 print("🇳🇬 Loading N-ATLAS cached responses...")
 
-# Global variables for cache data and metadata
+# Global variables
 CACHED_DATA = {"yoruba": [], "igbo": [], "hausa": [], "english": []}
 METADATA = {}
 total_cached = 0
-LANG_MODEL = None # Initialize global fasttext model variable
 
 try:
     # Load complete dataset
@@ -51,82 +51,61 @@ except FileNotFoundError as e:
     print(f"❌ ERROR: Cache files not found! {e}")
     print(f"   Make sure {CACHE_DIR_NAME}/ folder exists with JSON files")
 
-try:
-    # Load Language Detection Model (lid.176.ftz)
-    model_path = os.path.join(os.path.dirname(__file__), 'lid.176.ftz')
-    if os.path.exists(model_path):
-        LANG_MODEL = fasttext.load_model(model_path)
-        print("✅ Language Detection Model loaded!")
-    else:
-        print("⚠️ Warning: fastText model (lid.176.bin) not found. Auto-detection disabled.")
-except Exception as e:
-    print(f"❌ ERROR loading fastText model: {e}")
-
-
-# ============================================================================
-# FUZZY MATCHING & KEYWORD FUNCTIONS (STEP 2 & 3)
-# ============================================================================
-
-# 🌟 EXPANDED MEDICAL TERMS LIST (STEP 2)
-EXPANDED_MEDICAL_TERMS = {
-    'yoruba': [
-        'iba', 'otutu', 'aarun', 'aisan',         # Fever, Cold/Chill, Illness, Sickness
-        'ori', 'inu', 'ara', 'egungun', 'aya',    # Head, Stomach/Inside, Body, Bone, Chest
-        'gbuuru', 'ikọ', 'obi', 'eebi',           # Diarrhea, Cough, Chest/Heart, Vomit
-        'rẹwẹsi', 'tutu', 'ogun oru',             # Weakness, Cold, Night sweat
-        'ọgbẹ', 'malaria', 'àìsàn', 'gbígbọ̀n'    # Wound/Sore, Malaria, Sickness, Shivering/Chills
-    ],
-    'igbo': [
-        'ọkụ', 'isi', 'ahụ', 'mgbu', 'ọrịa',      # Fever/Heat, Head, Body, Pain, Sickness
-        'afọ', 'obi', 'akụkụ', 'ụkwara',          # Stomach, Chest/Heart, Side/Rib, Cough
-        'nsi', 'ike', 'oyi', 'ọbara',             # Feces/Diarrhea, Strength/Weakness, Cold, Blood
-        'agbọ', 'ọkụọkụ', 'isi ọwụwa', 'ịgba',   # Vomit, Fever, Headache, Cramp/Seizure
-        'ịba', 'oké mgbu', 'nkwonkwo', 'azụ'      # Malaria, Severe pain, Joint, Back
-    ],
-    'hausa': [
-        'zazzaɓi', 'sanyi', 'ciwo', 'jinya',       # Fever, Cold, Pain, Sickness
-        'kai', 'ciki', 'jiki', 'ƙashi', 'ƙirji',   # Head, Stomach, Body, Bone, Chest
-        'tari', 'zawo', 'mura', 'ƙarfi',          # Cough, Diarrhea, Cold, Strength/Weakness
-        'hanta', 'zubar', 'jini', 'amo',           # Liver, Bleed/Discharge, Blood, Ringing (ear)
-        'malariya', 'ciwon ciki', 'amai', 'baya'  # Malaria, Stomach pain, Vomit, Back
-    ],
-    'english': [
-        'fever', 'headache', 'pain', 'ache', 'sore', # Fever, Headache, Pain, Ache, Sore
-        'body', 'stomach', 'chest', 'bone', 'back',  # Body, Stomach, Chest, Bone, Back
-        'cough', 'diarrhea', 'vomit', 'weak',        # Cough, Diarrhea, Vomit, Weak
-        'cold', 'chills', 'flu', 'malaria',          # Cold, Chills, Flu, Malaria
-        'nausea', 'sickness', 'illness', 'fatigue'   # Nausea, Sickness, Illness, Fatigue
-    ]
-}
-
-
-# --- Language Detection Function (STEP 3) ---
+# --- Language Detection Function (USING LANGDETECT) ---
 def detect_language(text):
-    """Detects language using fastText and maps it to N-ATLAS languages."""
-    global LANG_MODEL
+    """Detects language using langdetect and maps it to N-ATLAS languages."""
     
-    if not LANG_MODEL:
-        return 'english' # Default to English if model not loaded
-
-    predictions = LANG_MODEL.predict(text, k=1)
-    lang_code = predictions[0][0].replace('__label__', '') 
+    # langdetect codes (may be inaccurate for African languages)
+    try:
+        lang_code = detect(text)
+    except Exception:
+        # Default to English if detection fails
+        return 'english' 
     
-    # Map fastText codes to your API's language names
+    # Map detection codes to your API's language names
     code_map = {
-        'yo': 'yoruba',
-        'ig': 'igbo',
-        'ha': 'hausa',
-        'en': 'english'
+        'yo': 'yoruba',  
+        'ig': 'igbo',    
+        'ha': 'hausa',   
+        'en': 'english', 
+        'pt': 'english', # Map secondary related languages to English fallback
+        'fr': 'english', 
+        'es': 'english', 
     }
     
     # Return the mapped language, or 'english' as a default fallback
     return code_map.get(lang_code, 'english')
 
 
+# ============================================================================
+# FUZZY MATCHING & KEYWORD FUNCTIONS (Remainder of the file)
+# ============================================================================
+
+EXPANDED_MEDICAL_TERMS = {
+    'yoruba': [
+        'iba', 'otutu', 'aarun', 'aisan', 'ori', 'inu', 'ara', 'egungun', 'aya',    
+        'gbuuru', 'ikọ', 'obi', 'eebi', 'rẹwẹsi', 'tutu', 'ogun oru', 'ọgbẹ', 
+        'malaria', 'àìsàn', 'gbígbọ̀n'    
+    ],
+    'igbo': [
+        'ọkụ', 'isi', 'ahụ', 'mgbu', 'ọrịa', 'afọ', 'obi', 'akụkụ', 'ụkwara',          
+        'nsi', 'ike', 'oyi', 'ọbara', 'agbọ', 'ọkụọkụ', 'isi ọwụwa', 'ịgba',   
+        'ịba', 'oké mgbu', 'nkwonkwo', 'azụ'      
+    ],
+    'hausa': [
+        'zazzaɓi', 'sanyi', 'ciwo', 'jinya', 'kai', 'ciki', 'jiki', 'ƙashi', 'ƙirji',   
+        'tari', 'zawo', 'mura', 'ƙarfi', 'hanta', 'zubar', 'jini', 'amo',           
+        'malariya', 'ciwon ciki', 'amai', 'baya'  
+    ],
+    'english': [
+        'fever', 'headache', 'pain', 'ache', 'sore', 'body', 'stomach', 'chest', 'bone', 
+        'back', 'cough', 'diarrhea', 'vomit', 'weak', 'cold', 'chills', 'flu', 
+        'malaria', 'nausea', 'sickness', 'illness', 'fatigue'   
+    ]
+}
+
+
 def find_best_match(user_input, language, threshold=70):
-    """
-    Find best matching cached response using fuzzy matching
-    """
     
     if language not in CACHED_DATA or language not in ['yoruba', 'igbo', 'hausa', 'english']:
         return None
@@ -136,13 +115,11 @@ def find_best_match(user_input, language, threshold=70):
     if not cached_cases:
         return None
     
-    # Extract all cached inputs (only successful cases)
     cached_inputs = [case.get('input', '') for case in cached_cases if case.get('success', False)]
     
     if not cached_inputs:
         return None
     
-    # Find best match using fuzzy matching
     best_match = process.extractOne(
         user_input, 
         cached_inputs,
@@ -153,7 +130,6 @@ def find_best_match(user_input, language, threshold=70):
         matched_input = best_match[0]
         similarity_score = best_match[1]
         
-        # Find the full cached response
         for case in cached_cases:
             if case.get('input') == matched_input and case.get('success', False):
                 return {
@@ -167,11 +143,9 @@ def find_best_match(user_input, language, threshold=70):
     return None
 
 def extract_keywords(text):
-    """Extract potential medical keywords from text using the EXPANDED list"""
     keywords = []
     text_lower = text.lower()
     
-    # Check against all expanded terms regardless of detected language for maximum coverage
     for lang_terms in EXPANDED_MEDICAL_TERMS.values():
         for term in lang_terms:
             if term in text_lower:
@@ -180,7 +154,6 @@ def extract_keywords(text):
     return list(set(keywords))
 
 def get_fallback_response(text, language):
-    """Generate fallback response when no good match is found"""
     keywords = extract_keywords(text)
     
     return {
@@ -200,12 +173,11 @@ def get_fallback_response(text, language):
     }
 
 # ============================================================================
-# API ENDPOINTS (STEP 4: Updated to use auto-detection)
+# API ENDPOINTS (No further changes needed here)
 # ============================================================================
 
 @app.route('/', methods=['GET'])
 def home():
-    """Root endpoint - API info"""
     return jsonify({
         "name": "N-ATLAS Nigerian Medical API",
         "version": "1.0.0",
@@ -215,13 +187,14 @@ def home():
         "endpoints": {
             "/health": "Health check",
             "/analyze": "Full medical analysis (POST)",
+            "/quick-symptoms": "Quick symptom extraction (POST)",
+            "/analyze-for-doctors": "Analysis formatted for doctor suggestion (POST)"
         },
         "status": "online"
     })
 
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check endpoint"""
     return jsonify({
         "status": "healthy",
         "model": "N-ATLAS",
@@ -235,7 +208,6 @@ def health():
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    """Full medical analysis endpoint"""
     try:
         data = request.json
         
@@ -269,7 +241,6 @@ def analyze():
         
         print(f"📝 Analyzing: '{text[:50]}...' ({language})")
         
-        # Try to find best match
         result = find_best_match(text, language, threshold=70)
         
         if not result:
@@ -289,7 +260,6 @@ def analyze():
 
 @app.route('/quick-symptoms', methods=['POST'])
 def quick_symptoms():
-    """Quick symptom identification endpoint"""
     try:
         data = request.json
         text = data.get('text', '').strip()
@@ -301,7 +271,6 @@ def quick_symptoms():
                 "error": "Empty text provided"
             }), 400
         
-        # --- Language Logic: Use input language or auto-detect ---
         if language_input in ['yoruba', 'igbo', 'hausa', 'english']:
             language = language_input
         else:
@@ -309,7 +278,6 @@ def quick_symptoms():
         
         print(f"⚡ Quick check: '{text[:50]}...' ({language})")
         
-        # Find best match
         result = find_best_match(text, language, threshold=65)
         
         if result:
@@ -335,9 +303,6 @@ def quick_symptoms():
 
 @app.route('/analyze-for-doctors', methods=['POST'])
 def analyze_for_doctors():
-    """
-    Enhanced analysis formatted for doctor suggestion API
-    """
     try:
         data = request.json
         text = data.get('text', '').strip()
@@ -349,7 +314,6 @@ def analyze_for_doctors():
                 "error": "Empty text provided"
             }), 400
         
-        # --- Language Logic: Use input language or auto-detect ---
         if language_input in ['yoruba', 'igbo', 'hausa', 'english']:
             language = language_input
         else:
@@ -357,13 +321,11 @@ def analyze_for_doctors():
         
         print(f"👨‍⚕️ Doctor analysis: '{text[:50]}...' ({language})")
         
-        # Find best match
         result = find_best_match(text, language, threshold=70)
         
         if not result:
             result = get_fallback_response(text, language)
         
-        # Format for doctor suggestion API
         response = {
             "success": True,
             "enhanced_notes": result.get('enhanced_notes', ''),
