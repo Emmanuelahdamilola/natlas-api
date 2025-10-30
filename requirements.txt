@@ -1,6 +1,6 @@
 Flask==3.0.0
 flask-cors==4.0.0
 gunicorn==21.2.0
-fasttext
 rapidfuzz==3.14.1
 numpy==1.26.0
+langdetect
